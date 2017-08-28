@@ -1,0 +1,299 @@
+---
+output: 
+  html_document: 
+    keep_md: yes
+---
+The Impact of Severe Weather Events on Public Health and Economic Issues
+===================================================================================================
+
+
+Synopsis
+==========
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+A. Across the United States, which types of events (as indicated in the 𝙴𝚅𝚃𝚈𝙿𝙴 variable) are most harmful with respect to population health?
+B. Across the United States, which types of events have the greatest economic consequences?
+
+
+
+Data Processing : Load Libraries, Enable Global Settings, Read Data, Data Selection
+========================================================================================
+
+```{r}
+echo = TRUE  # Always make code visible
+
+
+library(ggplot2)
+library(plyr)
+library(lubridate) ## to change to date formate
+library(data.table) ## to replace readble column names
+
+suppressWarnings(suppressMessages(library(R.utils)))
+suppressWarnings(suppressMessages(require(gridExtra)))
+
+
+datafile <-"repdata-data-StormData.csv"
+if(!file.exists(datafile)){
+    tmp <- tempfile()
+    download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2",tmp)
+    bunzip2(tmp,dest,overwrite=TRUE, remove=FALSE)
+    unlink(tmp)
+}
+
+#read the stormdata file
+
+
+
+Storm <- read.csv(datafile,header=TRUE)
+```
+
+Get a feel of the csv file
+```{r}
+dimension <- dim(Storm)
+
+head(Storm)
+
+colnames <- names(Storm)
+
+
+```
+The data has dimensions `r dimension`.
+
+To answer the questions, I need the following variables:
+* BGN_DATE = date
+* EVTYPE = weatherevent
+* FATALITIES = fatalities
+* INJURIES = injuries
+* PROPDMG = propertydamage
+* PROPDMGEXP = propertydamage x exponent
+* CROPDMG = cropdamage
+* CROPDMGEXP = cropdamage x exponent 
+
+
+Data Processing : Data-Cleanup
+===================================
+
+* convert date into date format
+* Convert titles to be more readable
+* convert exponent
+    + k/K = 1000
+    + b/B = 1,000,000,000
+    + m/M = 1,000,000
+    + Others = 0
+* weatherevent has too much variability in the reporting
+    + homogenize the vocab used 
+    + adjectives : extreme, non, prolonged, unusual, winter, warm, dry, cold
+    + events : flood, lightning, rain, rip current, storm, tornado, thunderstorm,  blizzard ...
+ 
+```{r}
+
+Storm$BGN_DATE <- mdy_hms(Storm$BGN_DATE)
+
+desiredcol <- c("BGN_DATE","EVTYPE","FATALITIES","INJURIES","PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP")
+Storm2 <- Storm[desiredcol]
+
+setnames(Storm2, old=c("BGN_DATE","EVTYPE","FATALITIES","INJURIES","PROPDMG","PROPDMGEXP","CROPDMG","CROPDMGEXP"), new=c("date", "weatherevent","fatalities","injuries","propertydamage","propertydamageXexp","cropdamage","cropdamageXexp"))
+
+Storm2$propertydamageXexp2 <- Storm2$propertydamageXexp
+Storm2$propertydamageXexp2 <- revalue(Storm2$propertydamageXexp2,c("K"="3","M"="6","m"="6","B"="9","+"="0","h"="2","H"="2","-"="0","?"="0"))
+Storm2$propertydamageXexp2[Storm2$propertydamageXexp2==""] <- "0"
+Storm2$propertydamageXexp2 <- as.numeric(Storm2$propertydamageXexp2)
+unique(Storm2$propertydamageXexp2)
+
+
+
+Storm2$cropdamageXexp2 <- Storm2$cropdamageXexp
+Storm2$cropdamageXexp2 <- revalue(Storm2$cropdamageXexp2,c("K"="3","M"="6","m"="6","B"="9","+"="0","h"="2","H"="2","-"="0","?"="0"))
+Storm2$cropdamageXexp2[Storm2$cropdamageXexp2==""] <- "0"
+Storm2$cropdamageXexp2 <- as.numeric(Storm2$cropdamageXexp2)
+unique(Storm2$cropdamageXexp2)
+
+
+
+Storm2$propertydamageFull = Storm2$propertydamage *(10^Storm2$propertydamageXexp2)
+Storm2$cropdamageFull = Storm2$cropdamage *(10^Storm2$cropdamageXexp2)
+
+# convert everuthing to lower case
+Storm2$weatherevent <- tolower(Storm2$weatherevent)
+# remove leading and trailing spaces
+Storm2$weatherevent <- gsub("^[[:space:]]+|[[:space:]]+$", "", Storm2$weatherevent)
+
+# correction of spelling and grouping adjectives and nouns with similar meaning
+Storm2$weatherevent <- gsub("excessive|excessively|extremely", "extreme", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("floodinging*|floooding|flood", "flood", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("flash flooding.*", "flood", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("lightning\\.|lighting|lightning", "lightning", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("non-", "non ", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("prolong", "prolonged", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("rains", "rain", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("rip currents", "rip current", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("storms", "storm", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("torndao|tornadoes", "tornado", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("th*und*er*[a-z]*rmw*|thunderstrom|thuderstorm", "thunderstorm", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("tstm wind","thunderstorm wind", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("unusually", "unusual", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("wild.*fire.*|wild/forest.*", "wild/forest fires", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("winds|wnd", "wind", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("wintery", "winter", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("warmth", "warm", Storm2$weatherevent)
+
+# grouping events
+Storm2$weatherevent <- gsub("^blizzard.*|ice storm", "blizzard", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^coastal.*|.*/cstl .*", "coastal erosion/flood/storm ",Storm2$weatherevent)
+Storm2$weatherevent <- gsub("extreme cold.*|extended cold.*", "extreme cold",Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^dry.*|drought|extreme heat.*|^heat.*", "drought", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^flood.*", "flood", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^freeze|^freezing.*|^frost.*","freezing fog/rain/sleet/snow", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("hail.*", "hail", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("heavy rain.*|rain.*|prolonged rain", "rain", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("hurricane.*", "hurricane", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("heavy snow.*|^snow.*|excessive snow", "heavy snow/ice",Storm2$weatherevent)
+Storm2$weatherevent <- gsub("lightning.*", "lightning", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^marine.*", "marine thunderstorm/accident",Storm2$weatherevent)
+Storm2$weatherevent <- gsub("rip current.*|heavy surf.*|high surf.*", "heavy surf",Storm2$weatherevent)
+Storm2$weatherevent <- gsub("sleet.*", "sleet", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("volcanic.*", "volcanic", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("thunderstorm.*|severe thunderstorm", "thunderstorm", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("tornado.*", "tornado", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("tropical storm.*", "tropical storm", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("unseasonal.*|^unseasonabl[ey].*|^^unusual.*","unusual weather", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("high wind.*|strong wind.*|^wind.*", "wind", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^waterspout.*|water spout", "waterspout", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^winter.*", "winter conditions", Storm2$weatherevent)
+Storm2$weatherevent <- gsub("^none|^summary.*", "?", Storm2$weatherevent)
+
+# remove multiple spaces
+Storm2$weatherevent <- gsub("[[:space:]]+", " ", Storm2$weatherevent)
+
+
+
+```
+
+
+Data Processing : Segregate Data according to the damage type
+==================================================================
+
+```{r}
+
+
+fatalitiescol <- c("date","weatherevent","fatalities")
+StormFatalities <- Storm2[fatalitiescol]
+injuriescol<- c("date","weatherevent","injuries")
+StormInjuries <- Storm2[injuriescol]
+propdcol<- c("date","weatherevent","propertydamageFull")
+StormPropd <- Storm2[propdcol]
+cropdcol<- c("date","weatherevent","cropdamageFull")
+StormCropd <- Storm2[cropdcol]
+Storm3col <-c("date","weatherevent","fatalities","injuries","propertydamageFull","cropdamageFull")
+Storm3 <- Storm2[Storm3col]
+
+head(Storm3)
+
+
+```
+
+
+
+
+Results : Impact on Public Health
+=====================================
+Across the United States, which types of events are most harmful with respect to population health?
+
+Public Health effects include fatalities and injuries.The data is ordered according to the the number of casualties, from highest to lowest, and the top 15 weather conditions are selected.
+
+```{r fig.height=10, fig.width=10}
+
+
+StormFatalities_sum <- ddply(StormFatalities, .(weatherevent), summarize, total = sum(fatalities, na.rm=TRUE))
+StormFatalities_sumordered <- StormFatalities_sum[order(StormFatalities_sum$total, decreasing = TRUE),]
+
+
+StormInjuries_sum <- ddply(StormInjuries, .(weatherevent), summarize, total = sum(injuries, na.rm=TRUE))
+StormInjuries_sumordered <- StormInjuries_sum[order(StormInjuries_sum$total, decreasing = TRUE),]
+
+
+
+
+head(StormFatalities_sumordered)
+head(StormInjuries_sumordered)
+
+
+
+library(gridExtra)
+fatalities_plot<- ggplot(StormFatalities_sumordered[1:15,], aes(reorder(weatherevent,-total), total)) +
+geom_histogram(stat = "identity") +
+theme_bw() +
+xlab("Weather Event")+ 
+ylab("Number of Fatalities")+ 
+labs(title="The top 15 weather events by Fatalities") +
+theme(axis.text.x=element_text(angle=90,hjust=1))
+
+injuries_plot<- ggplot(StormInjuries_sumordered[1:15,], aes(reorder(weatherevent,-total), total)) +
+geom_histogram(stat = "identity") +
+theme_bw() +
+xlab("Weather Event")+ 
+ylab("Number of Injuries")+ 
+labs(title="The top 15 weather events by Injuries") +
+theme(axis.text.x=element_text(angle=90,hjust=1))
+  
+
+
+grid.arrange(fatalities_plot, injuries_plot, nrow = 2)
+```
+
+
+The chart show that tornado is the major cause of casualties in the US, for both fatalities and injuries. 
+
+
+Results : Impact on Economy
+===============================
+
+Across the United States, which types of events have the greatest economic consequences?
+
+Economy effects include property and crop damage. Similary the data is ordered according to the damage level, from highest to lowest, and the top 15 weather conditions are selected for both property and crop damages.
+
+ 
+
+```{r fig.height=10, fig.width=10}
+
+
+StormPropd_sum <- ddply(StormPropd, .(weatherevent), summarize, total = sum(propertydamageFull, na.rm=TRUE))
+StormPropd_sumordered <- StormPropd_sum[order(StormPropd_sum$total, decreasing = TRUE),]
+
+
+StormCropd_sum <- ddply(StormCropd, .(weatherevent), summarize, total = sum(cropdamageFull, na.rm=TRUE))
+StormCropd_sumordered <- StormCropd_sum[order(StormCropd_sum$total, decreasing = TRUE),]
+
+
+
+head(StormPropd_sumordered)
+head(StormCropd_sumordered)
+
+
+
+library(gridExtra)
+property_plot<- ggplot(StormPropd_sumordered[1:15,], aes(reorder(weatherevent,-total), total)) +
+geom_histogram(stat = "identity") +
+theme_bw() +
+xlab("Weather Event")+ 
+ylab("Level of Property Damage(in USD)")+ 
+labs(title="The top 15 weather events by Property Damage") +
+theme(axis.text.x=element_text(angle=90,hjust=1))
+
+crop_plot<- ggplot(StormCropd_sumordered[1:15,], aes(reorder(weatherevent,-total), total)) +
+geom_histogram(stat = "identity") +
+theme_bw() +
+xlab("Weather Event")+ 
+ylab("Level of Crop Damage (in USD)")+ 
+labs(title="The top 15 weather events by Crop Damage") +
+theme(axis.text.x=element_text(angle=90,hjust=1))
+  
+
+
+grid.arrange(property_plot, crop_plot, nrow = 2)
+```
+In this case, floods and hail are the major causes of economic damages in the US, leading to property damages and crop damages respectively.
+
+
